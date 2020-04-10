@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,30 +24,28 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
-	var username2 user2
-	var username1 user1
-	username1.Firstname = "Waralee"
-	username1.Lastname = "Sakaranurak"
-
 	conn, err := amqp.Dial("amqp://root:tzrootroot@localhost:5672")
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
 
-	ch, err := conn.Channel()
+	chInput, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	defer chInput.Close()
 
-	q, err := ch.QueueDeclare(
-		"hello-queue", // name
+	chOutput, err := conn.Channel()
+	failOnError(err, "Failed to open a channel")
+	defer chOutput.Close()
+
+	q, err := chInput.QueueDeclare(
+		"queue:input", // name
 		false,         // durable
 		false,         // delete when unused
 		false,         // exclusive
 		false,         // no-wait
 		nil,           // arguments
 	)
-	failOnError(err, "Failed to declare a queue")
-
-	msgs, err := ch.Consume(
+	failOnError(err, "Failed to declare a queue input")
+	msgs, err := chInput.Consume(
 		q.Name, // queue
 		"",     // consumer
 		true,   // auto-ack
@@ -59,33 +56,41 @@ func main() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	buf := bytes.Buffer{}
-	buf.WriteString(username1.Firstname)
-	buf.WriteString(username1.Lastname)
-	username2.Fullname = buf.String()
-
-	data, err := json.Marshal(username2)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(data))
-	err = ch.Publish(
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(data),
-		})
-	log.Printf(" [x] Sent %s", data)
-	failOnError(err, "Failed to publish a message")
+	qo, err := chOutput.QueueDeclare(
+		"queue:output", // name
+		false,          // durable
+		false,          // delete when unused
+		false,          // exclusive
+		false,          // no-wait
+		nil,            // arguments
+	)
+	failOnError(err, "Failed to declare a queue output")
 
 	forever := make(chan bool)
 
 	go func() {
 		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
+			var inputUser user1
+			err := json.Unmarshal(d.Body, &inputUser)
+			if err != nil {
+				fmt.Println("Convert string to json error", err)
+			}
+			outputUser := user2{
+				Fullname: fmt.Sprintf("%s %s", inputUser.Firstname, inputUser.Lastname),
+			}
+			newJSONStringValue, err := json.Marshal(outputUser)
+			if err != nil {
+				fmt.Println("Convert struct to json string error", err)
+			}
+			err = chOutput.Publish(
+				"",      // exchange
+				qo.Name, // routing key
+				false,   // mandatory
+				false,   // immediate
+				amqp.Publishing{
+					ContentType: "text/plain",
+					Body:        []byte(newJSONStringValue),
+				})
 		}
 	}()
 
