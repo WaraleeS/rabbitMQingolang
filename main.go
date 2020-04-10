@@ -8,12 +8,12 @@ import (
 	"github.com/streadway/amqp"
 )
 
-type user1 struct {
+type userInput struct {
 	Firstname string `json: "firstname"`
 	Lastname  string `json: "lastname"`
 }
 
-type user2 struct {
+type userOutput struct {
 	Fullname string `json: "fullname"`
 }
 
@@ -70,12 +70,12 @@ func main() {
 
 	go func() {
 		for d := range msgs {
-			var inputUser user1
+			var inputUser userInput
 			err := json.Unmarshal(d.Body, &inputUser)
 			if err != nil {
 				fmt.Println("Convert string to json error", err)
 			}
-			outputUser := user2{
+			outputUser := userOutput{
 				Fullname: fmt.Sprintf("%s %s", inputUser.Firstname, inputUser.Lastname),
 			}
 			newJSONStringValue, err := json.Marshal(outputUser)
